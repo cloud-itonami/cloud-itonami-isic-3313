@@ -1,0 +1,11 @@
+{:itonami.blueprint/id "cloud-itonami-3313"
+ :itonami.blueprint/name "Community Electronic and Optical Equipment Repair Operations"
+ :itonami.blueprint/isic-rev5 "3313"
+ :itonami.blueprint/domain :manufacturing/electronic-equipment-repair
+ :itonami.blueprint/license "AGPL-3.0-or-later"
+ :itonami.blueprint/social-impact [:right-to-repair :waste-reduction :local-jobs]
+ :itonami.blueprint/governor :electronic-repair-governor
+ :itonami.blueprint/robotics true
+ :itonami.blueprint/required-technologies [:robotics :identity :forms :dmn :bpmn :audit-ledger :eda :cae]
+ :itonami.blueprint/optional-technologies []
+ :itonami.blueprint/status :public-oss}
