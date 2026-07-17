@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Community Electronic and Optical Equipment Repair Operations | cloud-itonami-isic-3313</title>
+  <meta name="description" content="Community Electronic and Optical Equipment Repair Operations — governed open occupation blueprint (ISIC 3313).">
+  <style>
+    :root { --bg:#f5f7fa; --card:#fff; --fg:#1b1f24; --muted:#57606a; --accent:#1e3a8a; --line:#d0d7de; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#0d1117; --card:#161b22; --fg:#e6edf3; --muted:#8d96a0; --accent:#58a6ff; --line:#30363d; }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: linear-gradient(135deg, var(--bg), #c3cfe2);
+           min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; color: var(--fg); }
+    .container { max-width: 800px; width: 100%; background: var(--card); border-radius: 12px;
+                 box-shadow: 0 10px 40px rgba(0,0,0,.1); padding: 48px 40px; border: 1px solid var(--line); }
+    h1 { font-size: 1.85rem; color: var(--accent); margin-bottom: 8px; }
+    .badge { display: inline-block; background: #e0e7ff; color: var(--accent); padding: 3px 10px;
+             border-radius: 4px; font-size: .85rem; font-weight: 600; margin-bottom: 20px; }
+    @media (prefers-color-scheme: dark) { .badge { background: #1f2a44; } }
+    .pitch { border-left: 4px solid var(--accent); padding-left: 16px; margin: 20px 0 28px; color: var(--muted); line-height: 1.7; }
+    .pitch p { margin-bottom: 10px; }
+    .meta { font-size: .9rem; color: var(--muted); margin-bottom: 24px; }
+    .meta code { background: var(--bg); padding: 1px 6px; border-radius: 4px; }
+    .cta { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 28px; }
+    @media (max-width: 560px) { .cta { grid-template-columns: 1fr; } }
+    .cta a { display: block; text-align: center; text-decoration: none; padding: 14px 18px;
+             border-radius: 8px; font-weight: 600; }
+    .cta .primary { background: var(--accent); color: #fff; }
+    .cta .secondary { border: 1.5px solid var(--accent); color: var(--accent); }
+    ul.links { list-style: none; font-size: .95rem; }
+    ul.links li { margin: 8px 0; }
+    a { color: var(--accent); }
+    footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line);
+             font-size: .85rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <h1>Community Electronic and Optical Equipment Repair Operations</h1>
+    <div class="badge">ISIC 3313 · maturity unknown</div>
+    <div class="pitch">
+      <p>Open Business Blueprint for ISIC Rev.5 3313: repair of electronic and optical equipment (diagnostic, calibration and certified repair of electronic instruments, test/measurement equipment, and optical devices).</p>
+      <p>This repository designs a forkable OSS business for community electronic/optical repair: repair-authority and calibration- certification-scope management, robotics-assisted diagnostics, component-level rework and post-repair calibration, and repair/ certification records — run by a qualified operator so a repair shop keeps its own calibration and repair history instead of renting a closed repair-operations platform.</p>
+      <p>cloud-itonami-isic-3312 (&quot;Community Industrial Machinery Repair Operations&quot;) is scoped to mechanical industrial equipment (pumps, compressors, turbines). This repository is deliberately scoped to the SEPARATE class of electronic and optical equipment: test/measurement instruments, optical devices, and other electronic apparatus. Also distinct from cloud-itonami-isic-2660 (medical device manufacturing) and other manufacturing verticals in this fleet, which build NEW equipment -- this repository repairs and recertifies EXISTING equipment. Electronic/optical repair carries its own distinct compliance concerns: calibration services frequently require ISO/IEC 17025 laboratory accreditation; component-level rework follows IPC/WHMA-A-620 and IPC-7711/7721 industry rework/repair standards; right-to-repair legislation (various US state acts, the EU's Right to Repair Directive 2024/1799) increasingly shapes access to parts, diagnostics and service documentation for this class of equipment specifically.</p>
+    </div>
+    <p class="meta">Domain <code>manufacturing/electronic-equipment-repair</code> · Governor <code>electronic-repair-governor</code> · License <code>AGPL-3.0-or-later</code></p>
+    <div class="cta">
+      <a class="primary" href="https://itonami.cloud/isco-1212/">Fork + self-host claim</a>
+      <a class="secondary" href="https://itonami.cloud/docs/go-live.md">Paid go-live path</a>
+    </div>
+    <ul class="links">
+      <li><a href="https://github.com/cloud-itonami/cloud-itonami-isic-3313">GitHub repository</a></li>
+      <li><a href="./operator-quickstart.md">Operator quickstart</a></li>
+      <li><a href="https://github.com/cloud-itonami/cloud-itonami-isic-3313/blob/main/blueprint.edn">blueprint.edn</a></li>
+      <li><a href="https://github.com/cloud-itonami/cloud-itonami-isic-3313/blob/main/README.md">README</a></li>
+    </ul>
+    <footer>
+      <p>Open occupation blueprint — no invented usage or revenue metrics. Product face generated for impl-product maturity (Lane C).</p>
+    </footer>
+  </main>
+</body>
+</html>
