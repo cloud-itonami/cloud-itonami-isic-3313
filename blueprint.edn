@@ -8,4 +8,57 @@
  :itonami.blueprint/robotics true
  :itonami.blueprint/required-technologies [:robotics :identity :forms :dmn :bpmn :audit-ledger :eda :cae]
  :itonami.blueprint/optional-technologies []
- :itonami.blueprint/status :public-oss}
+ :itonami.blueprint/status :public-oss
+ :itonami.blueprint/maturity :implemented
+ :itonami.blueprint/implemented-slice
+ "ElectronicRepairOps-LLM Advisor ⊣ Electronic Repair Governor,
+ langgraph-clj StateGraph (langgraph.graph,
+ electronicrepair.operation/build), append-only audit ledger
+ (electronicrepair.store/ledger + append-ledger!, mem-store). Fixes a
+ prior gap: `electronicrepair.operation` used to be four proposal-shape
+ builder functions plus prose describing a \"PROPOSAL API\" -- it never
+ `require`d `langgraph.graph`, never called
+ state-graph/add-node/compile-graph, and was never itself required by
+ anything else in `src/`. There was no `advisor.cljc`/`defprotocol`/mock
+ ANYWHERE in this repo (only prose mentions of \"advise\" elsewhere; the
+ four proposal functions were literal dead code, never run against the
+ governor from any real flow). Now: a genuinely compiled StateGraph
+ (`:intake -> :advise -> :govern -> :decide -+-> :commit /
+ :request-approval -> :commit / :hold`) with `interrupt-before
+ #{:request-approval}` + an in-memory checkpointer for real
+ human-in-the-loop resume, mirroring `pastaops.operation`
+ (cloud-itonami-isic-1074) node/edge structure. `electronicrepair.advisor`
+ is a real `Advisor` protocol + `MockAdvisor` (new), with an op
+ vocabulary derived directly from what `electronicrepair.governor/check`
+ actually validates -- including a fifth op, `:complete-repair`
+ (technician-completion sign-off LOGGING, never the hands-on repair
+ itself), that governor already independently checked for
+ (`already-completed-violations`, `:actuation/complete-repair`
+ high-stakes) but had no proposal builder anywhere. Fixing this also
+ surfaced and corrected a real gap in the moved proposal builders: the
+ original `schedule-technician-dispatch` / `order-parts` never carried
+ `:client-id`/`:equipment-id` in their `:value`, even though governor's
+ `client-verification-violations`/`equipment-registration-violations`
+ apply to those two ops as well as intake creation -- meaning every
+ dispatch/parts-order proposal would have hard-held unconditionally the
+ first time it was ever actually run through the governor (confirmed
+ empirically pre-fix). `electronicrepair.store` now also exposes a
+ `Store` protocol (`MemStore`) alongside its original pure value helpers
+ (unchanged, still used directly by `electronicrepair.governor`'s
+ independent checks). `:complete-repair` (real technician sign-off) and
+ `:flag-safety-concern` (safety escalation) ALWAYS escalate to a human
+ shop dispatcher via the compiled graph's `:request-approval` node
+ (checkpoint-based resume), matching governor's own `high-stakes` set.
+ Proven end-to-end by `test/electronicrepair/operation_graph_test.clj`
+ exercising commit / hard-hold (unverified client) / escalate-approve /
+ escalate-reject / duplicate-dispatch hard-hold (after a genuine prior
+ commit) through the REAL compiled graph, including a falsifiable proof
+ that a custom injected Advisor's own (randomly generated, non-hardcoded)
+ proposal `:notes` is what lands in the committed ledger fact -- not a
+ graph-internal literal -- and that `store/mark-completed!`/
+ `mark-dispatched!` only fire as a genuine effect of a real `:commit`,
+ never while merely interrupted awaiting approval. `deps.edn`'s dependency
+ wiring (top-level `io.github.kotoba-lang/langgraph`) was already correct
+ and is unchanged; `sim.cljc` (new) fills a real gap -- `deps.edn`'s `:run`
+ alias already pointed at `-m electronicrepair.sim`, but that namespace
+ did not exist anywhere in the repo before this fix."}
