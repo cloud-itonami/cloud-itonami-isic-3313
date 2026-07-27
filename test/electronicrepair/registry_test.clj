@@ -95,3 +95,32 @@
           updated (registry/append history result)]
       (is (= 2 (count updated)))
       (is (= {"record_id" "R002"} (get updated 1))))))
+
+;; ---------------------------------------------------------------------------
+;; Money is compared at money precision, not at double precision
+;; ---------------------------------------------------------------------------
+
+(deftest a-correct-sum-of-cent-denominated-parts-is-not-rejected
+  (testing "`(== (double claimed) (double computed))` rejected CORRECT estimates:
+            a sum of 2-decimal part costs is routinely not the double nearest
+            the true total"
+    (doseq [costs [[0.1 0.2] [10.03 20.06] [29.99 29.99 29.99] [1.10 2.20 3.30]]]
+      (let [truth (/ (reduce + (map #(Math/round (* 100.0 %)) costs)) 100.0)]
+        (is (registry/parts-cost-matches-claim? {:parts (mapv (fn [c] {:cost c}) costs)
+                                          :total-parts-cost truth})
+            (str costs " should sum to " truth))))))
+
+(deftest a-genuinely-wrong-total-is-still-caught
+  (is (not (registry/parts-cost-matches-claim? {:parts [{:cost 29.99} {:cost 29.99}]
+                                         :total-parts-cost 59.97})))
+  (is (not (registry/parts-cost-matches-claim? {:parts [{:cost 10.00}]
+                                         :total-parts-cost 10.01}))))
+
+(deftest a-missing-or-non-numeric-total-never-matches
+  (testing "un-verifiable is not the same as correct"
+    (is (not (registry/parts-cost-matches-claim? {:parts [{:cost 10.00}]})))
+    (is (not (registry/parts-cost-matches-claim? {:parts [{:cost 10.00}]
+                                           :total-parts-cost "10.00"})))
+    (testing "a non-numeric part cost is skipped rather than crashing the sum"
+      (is (registry/parts-cost-matches-claim? {:parts [{:cost 10.00} {:cost nil}]
+                                        :total-parts-cost 10.00})))))

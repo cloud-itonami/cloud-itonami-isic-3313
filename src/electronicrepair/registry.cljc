@@ -39,11 +39,32 @@
   (let [s (str n)]
     (str (apply str (repeat (max 0 (- w (count s))) "0")) s)))
 
+(def ^:private money-scale
+  "Sub-minor-unit scale used when comparing two money amounts: 1/10000 of
+  a unit. Coarser than double representation error by many orders of
+  magnitude, finer than any real currency's minor unit (2 decimals for
+  most, 3 for KWD/BHD/OMR, 0 for JPY/KRW)."
+  10000)
+
+(defn- money=
+  "Exact-at-money-precision equality for two amounts.
+
+  `==` on raw doubles is NOT the right comparison for money: a sum of
+  2-decimal part costs is routinely not the double nearest the true
+  total, so a CORRECT claim compared false and a repair estimate that
+  was never wrong was rejected. Rounding both sides to `money-scale`
+  before comparing removes the representation error while preserving
+  every distinction money can actually carry."
+  [x y]
+  (and (number? x) (number? y)
+       (= (Math/round (* money-scale (double x)))
+          (Math/round (* money-scale (double y))))))
+
 (defn compute-total-parts-cost
   "Sum of all parts in the repair estimate (BOM).
   Ground-truth validation: individual part costs must sum correctly."
   [parts]
-  (reduce + (map :cost (filter :cost parts))))
+  (reduce + (map :cost (filter #(number? (:cost %)) parts))))
 
 (defn parts-cost-matches-claim?
   "Does the claimed total parts cost equal the independently recomputed
@@ -55,7 +76,7 @@
   (let [parts (:parts estimate)
         claimed (:total-parts-cost estimate)
         computed (compute-total-parts-cost parts)]
-    (== (double claimed) (double computed))))
+    (money= claimed computed)))
 
 (defn register-intake
   "Validate + construct the REPAIR-INTAKE registration DRAFT — the
