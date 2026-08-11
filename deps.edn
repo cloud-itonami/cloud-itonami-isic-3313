@@ -6,7 +6,14 @@
  ;; repo is standalone (forkable outside the workspace); the :local/root
  ;; paths only resolve inside the monorepo checkout — a standalone fork
  ;; should override them with git coordinates.
- :deps {io.github.kotoba-lang/langgraph
+ ;; jp-go-digital-design-system supplies the vendored DADS stylesheet the
+ ;; build-time operator console (`electronicrepair.render-html`) is skinned
+ ;; with. Git coordinates, not :local/root -- that repo's own deps.edn
+ ;; explains why a :local/root there breaks git-dependent consumers.
+ :deps {io.github.kotoba-lang/jp-go-digital-design-system
+        {:git/url "https://github.com/kotoba-lang/jp-go-digital-design-system"
+         :git/sha "83db99546eabc53613ae826ea41d1533a3c574af"}
+        io.github.kotoba-lang/langgraph
         {:local/root "../../kotoba-lang/langgraph"}}
  :aliases
  {;; offline workspace dev -- pin transitive langchain to local checkout
@@ -15,6 +22,10 @@
          {:local/root "../../kotoba-lang/langchain"}}}
   ;; clojure -M:dev:run  -> drive the demo through one OperationActor
   :run {:main-opts ["-m" "electronicrepair.sim"]}
+  ;; clojure -M:dev:render-html [out-file]
+  ;; -> regenerate docs/samples/operator-console.html by driving the REAL
+  ;;    compiled StateGraph + governor + store (no mock, no hand-written HTML)
+  :render-html {:main-opts ["-m" "electronicrepair.render-html"]}
   :test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner
                       {:git/tag "v0.5.1" :git/sha "dfb30dd"}}

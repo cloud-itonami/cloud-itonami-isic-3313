@@ -1,0 +1,532 @@
+(ns electronicrepair.render-html
+  "Build-time HTML renderer for `docs/samples/operator-console.html`.
+
+  Drives the REAL actor stack -- `electronicrepair.operation/build`'s
+  compiled langgraph StateGraph -> `electronicrepair.advisor` ->
+  `electronicrepair.governor` -> `electronicrepair.store` -- against a
+  seeded `store/mem-store`, then renders the resulting append-only
+  ledger and store snapshot. Nothing on the page is hand-written
+  domain data: every client / equipment / intake / estimate field
+  comes from the seed, every disposition, rule name and violation
+  detail string comes from `electronicrepair.governor`'s own checks.
+
+  Two things this renderer deliberately does NOT do:
+
+  1. It does not branch on `:approval-granted` / `:approval-requested`
+     / `:advisor-proposal`. Those facts exist ONLY on the graph's
+     in-memory `:audit` channel -- read `electronicrepair.operation`:
+     the `:commit` node appends `commit-fact` (`:t :committed`) and the
+     `:hold` node appends only facts whose `:t` is `:governor-hold` or
+     `:approval-rejected`. Those three are the ONLY fact types
+     `store/append-ledger!` is ever called with, so a status branch on
+     anything else would be dead code that can never render.
+  2. It does not restate the governor's thresholds as literals. The
+     confidence floor and the always-escalate stake set are read from
+     `electronicrepair.governor/confidence-floor` and
+     `.../high-stakes`; the phase gate columns are computed by calling
+     `electronicrepair.phase/phase-for-op` and
+     `.../phase-allows-commit?`; the HARD rules column is the set of
+     rules the governor actually emitted during this run.
+
+  Intake ids are not invented either -- they are minted by
+  `electronicrepair.registry/register-intake`, whose own shop-scoped
+  `SHOP-INT-NNNNNN` numbering is the repo's only intake-numbering
+  authority, and the resulting record maps are what the seed's
+  `:intakes` holds.
+
+  Output is deterministic: no timestamps, no randomness, every map
+  iterated in sorted-key order, so two consecutive runs against the
+  same seed are byte-identical.
+
+  Usage: `clojure -M:dev:render-html [out-file]`
+  (default `docs/samples/operator-console.html`)."
+  (:require [jp-go-dds.skin]
+            [clojure.string :as str]
+            [langgraph.graph :as g]
+            [electronicrepair.facts :as facts]
+            [electronicrepair.governor :as governor]
+            [electronicrepair.operation :as operation]
+            [electronicrepair.phase :as phase]
+            [electronicrepair.registry :as registry]
+            [electronicrepair.store :as store]))
+
+;; ----------------------------- seed -----------------------------
+
+(def ^:private shop-code "SHOP1")
+
+(def ^:private dispatcher
+  {:actor-id "shop-dispatcher-01" :role :shop-coordinator})
+
+(defn- intake-record
+  "Mint an intake id + record through the repo's own registry rather
+  than typing one in. Returns [intake-number record]."
+  [client-id equipment-id sequence]
+  (let [r (registry/register-intake client-id equipment-id shop-code sequence)]
+    [(get r "intake_number") (get r "record")]))
+
+(def ^:private intake-1 (intake-record "C-1001" "E-2001" 1))
+(def ^:private intake-2 (intake-record "C-1002" "E-2002" 2))
+(def ^:private intake-3 (intake-record "C-1002" "E-2003" 3))
+
+(def ^:private seed
+  "Reference repair-shop data.
+
+  Three deliberately non-compliant facts are seeded so the governor's
+  own checks -- not a hand-written string -- produce the HARD holds
+  this console shows:
+
+    * `C-1003` is on file but its `:contact` is blank, so
+      `facts/client-verified?` is false -> `:client-not-verified`.
+    * `E-2003` is a `:laser` head (one of `facts/safety-checklist-
+      required?`'s hazardous types) whose checklist has
+      `:hazmat-assessment?` and `:technician-certification-verified?`
+      still false -> `:safety-checklist-incomplete`.
+    * intake 2's estimate claims `:total-parts-cost` 112.5 while its
+      own `:parts` list sums to 92.5 ->
+      `registry/parts-cost-matches-claim?` is false ->
+      `:parts-cost-mismatch`.
+    * intake 3 has no `:estimates` entry at all ->
+      `facts/estimate-provided?` is false -> `:estimate-missing`."
+  {:clients
+   {"C-1001" {:id "C-1001" :name "ABC Electronics LLC"
+              :contact "service@abc-electronics.example"}
+    "C-1002" {:id "C-1002" :name "Midori Optical Lab"
+              :contact "frontdesk@midori-optical.example"}
+    ;; on file, but intake was taken without contact details
+    "C-1003" {:id "C-1003" :name "Walk-in counter customer" :contact ""}}
+
+   :equipment
+   {"E-2001" {:id "E-2001" :model "HP LaserJet 4050"
+              :equipment-type :office-equipment}
+    "E-2002" {:id "E-2002" :model "Philips 107P CRT monitor"
+              :equipment-type :crt}
+    "E-2003" {:id "E-2003" :model "Coherent Innova 70C laser head"
+              :equipment-type :laser}}
+
+   :safety-checklists
+   {"E-2002" {:electrical-safety-check? true
+              :hazmat-assessment? true
+              :technician-certification-verified? true}
+    ;; hazardous type, checklist started but NOT finished
+    "E-2003" {:electrical-safety-check? true
+              :hazmat-assessment? false
+              :technician-certification-verified? false}}
+
+   :intakes
+   {(first intake-1) (second intake-1)
+    (first intake-2) (second intake-2)
+    (first intake-3) (second intake-3)}
+
+   :estimates
+   {(first intake-1) {:labor-hours 2.5
+                      :parts-cost 148.0
+                      :description "Replace fuser assembly, recalibrate paper feed"
+                      :parts [{:part "fuser assembly" :cost 118.0}
+                              {:part "feed roller kit" :cost 30.0}]
+                      :total-parts-cost 148.0}
+    ;; claimed total does NOT match the parts list (72.5 + 20.0 = 92.5)
+    (first intake-2) {:labor-hours 4.0
+                      :parts-cost 112.5
+                      :description "Replace flyback transformer, discharge CRT anode"
+                      :parts [{:part "flyback transformer" :cost 72.5}
+                              {:part "anode cap" :cost 20.0}]
+                      :total-parts-cost 112.5}}})
+
+;; ----------------------------- scenario -----------------------------
+
+(defn- exec! [actor tid request]
+  (g/run* actor {:request request :context dispatcher} {:thread-id tid}))
+
+(defn- approve! [actor tid]
+  (g/run* actor {:approval {:status :approved :by (:actor-id dispatcher)}}
+          {:thread-id tid :resume? true}))
+
+(defn- reject! [actor tid]
+  (g/run* actor {:approval {:status :rejected :by (:actor-id dispatcher)}}
+          {:thread-id tid :resume? true}))
+
+(defn run-demo!
+  "Run the compiled StateGraph over the seed above and return the store.
+
+  Every subject id below is either seeded equipment (`E-200x`) or an
+  intake number minted by `registry/register-intake` into the seed's
+  `:intakes` -- no fabricated subjects.
+
+  Reaches every disposition this actor can produce:
+
+    clean auto-commit  -- intake of E-2001 for the verified client
+                          C-1001 (office equipment, no checklist
+                          required).
+    HARD hold          -- five distinct governor rules, each from
+                          genuinely non-compliant input:
+                          `:safety-checklist-incomplete` (laser head
+                          E-2003), `:client-not-verified` (C-1003 has
+                          no contact on file), `:already-dispatched`
+                          (second dispatch of the same intake),
+                          `:estimate-missing` (intake 3 has no
+                          estimate), `:parts-cost-mismatch` (intake 2's
+                          claimed total vs its own parts list), and
+                          `:already-completed` (second sign-off of a
+                          repair already recorded complete).
+    SOFT escalate      -- a parts order proposed below
+                          `governor/confidence-floor`; a human may and
+                          does approve it.
+    always escalate    -- `:complete-repair` and `:flag-safety-concern`
+                          carry `governor/high-stakes` stakes, so they
+                          escalate even when governor-clean; the
+                          dispatcher approves the first and rejects the
+                          second."
+  []
+  (let [s (store/mem-store {:initial seed})
+        actor (operation/build s)
+        [i1] intake-1
+        [i2] intake-2
+        [i3] intake-3]
+
+    ;; clean intake -> auto-commit
+    (exec! actor "t1" {:op :intake-repair-order :subject "E-2001"
+                       :client-id "C-1001" :equipment-id "E-2001"
+                       :shop-code shop-code :intake-sequence 1 :confidence 0.92})
+
+    ;; hazardous laser head, checklist unfinished -> HARD hold
+    (exec! actor "t2" {:op :intake-repair-order :subject "E-2003"
+                       :client-id "C-1002" :equipment-id "E-2003"
+                       :shop-code shop-code :intake-sequence 3 :confidence 0.88})
+
+    ;; client on file but unverifiable (blank contact) -> HARD hold
+    (exec! actor "t3" {:op :intake-repair-order :subject "E-2002"
+                       :client-id "C-1003" :equipment-id "E-2002"
+                       :shop-code shop-code :intake-sequence 4 :confidence 0.9})
+
+    ;; clean dispatch against intake 1's cost-matching estimate -> commit
+    (exec! actor "t4" {:op :schedule-technician-dispatch :subject i1
+                       :intake-id i1 :client-id "C-1001" :equipment-id "E-2001"
+                       :technician-id "T-014" :shop-code shop-code
+                       :dispatch-sequence 1 :confidence 0.9})
+
+    ;; same intake dispatched twice -> HARD hold
+    (exec! actor "t5" {:op :schedule-technician-dispatch :subject i1
+                       :intake-id i1 :client-id "C-1001" :equipment-id "E-2001"
+                       :technician-id "T-021" :shop-code shop-code
+                       :dispatch-sequence 2 :confidence 0.9})
+
+    ;; intake 3 has no estimate -> HARD hold
+    (exec! actor "t6" {:op :schedule-technician-dispatch :subject i3
+                       :intake-id i3 :client-id "C-1002" :equipment-id "E-2003"
+                       :technician-id "T-014" :shop-code shop-code
+                       :dispatch-sequence 3 :confidence 0.9})
+
+    ;; intake 2's claimed parts total contradicts its own parts list -> HARD hold
+    (exec! actor "t7" {:op :order-parts :subject i2
+                       :intake-id i2 :client-id "C-1002" :equipment-id "E-2002"
+                       :shop-code shop-code :order-sequence 1 :confidence 0.9})
+
+    ;; governor-clean but below the confidence floor -> SOFT escalate, approved
+    (exec! actor "t8" {:op :order-parts :subject i1
+                       :intake-id i1 :client-id "C-1001" :equipment-id "E-2001"
+                       :shop-code shop-code :order-sequence 2 :confidence 0.55})
+    (approve! actor "t8")
+
+    ;; technician sign-off: always escalates, dispatcher approves
+    (exec! actor "t9" {:op :complete-repair :subject i1
+                       :intake-id i1 :technician-id "T-014"
+                       :notes "Fuser assembly replaced, feed recalibrated, unit tested"
+                       :confidence 0.94})
+    (approve! actor "t9")
+
+    ;; second sign-off on the same repair -> HARD hold
+    (exec! actor "t10" {:op :complete-repair :subject i1
+                        :intake-id i1 :technician-id "T-021"
+                        :notes "Duplicate sign-off attempt"
+                        :confidence 0.94})
+
+    ;; safety escalation: always escalates, dispatcher rejects
+    (exec! actor "t11" {:op :flag-safety-concern :subject i3
+                        :intake-id i3 :concern-type :high-voltage-risk
+                        :description "Laser head PSU interlock may be bypassed"
+                        :confidence 0.81})
+    (reject! actor "t11")
+
+    s))
+
+;; ----------------------------- rendering -----------------------------
+
+(defn- esc [v]
+  (-> (str v)
+      (str/replace "&" "&amp;")
+      (str/replace "<" "&lt;")
+      (str/replace ">" "&gt;")))
+
+(defn- kw
+  "Print a keyword with its namespace intact (`name` would silently drop
+  `:actuation/` from the high-stakes values). Non-keywords -- e.g.
+  `phase/phase-for-op`'s integer phases -- pass through as-is."
+  [k]
+  (str k))
+
+(defn- yes-no [b klass-yes klass-no yes no]
+  (if b
+    (format "<span class=\"%s\">%s</span>" klass-yes yes)
+    (format "<span class=\"%s\">%s</span>" klass-no no)))
+
+(defn- last-fact-for [ledger subject]
+  (last (filter #(= (:subject %) subject) ledger)))
+
+(defn- status-cell
+  "Only the three fact types `store/append-ledger!` is ever called with
+  are branched on here -- see this namespace's docstring."
+  [ledger subject]
+  (let [f (last-fact-for ledger subject)]
+    (cond
+      (nil? f) "<span class=\"muted\">no ledger activity</span>"
+      (= :committed (:t f))
+      (format "<span class=\"ok\">committed &middot; %s</span>" (esc (kw (:op f))))
+      (= :governor-hold (:t f))
+      (format "<span class=\"critical\">HARD hold &middot; %s</span>"
+              (esc (str/join ", " (map kw (:basis f)))))
+      (= :approval-rejected (:t f))
+      (format "<span class=\"warn\">approver rejected &middot; %s</span>" (esc (kw (:op f))))
+      :else "<span class=\"muted\">unknown</span>")))
+
+(defn- client-row [snap client-id]
+  (let [c (store/client snap client-id)]
+    (format "        <tr><td><code>%s</code></td><td>%s</td><td>%s</td><td>%s</td></tr>"
+            (esc (:id c)) (esc (:name c))
+            (if (str/blank? (:contact c))
+              "<span class=\"muted\">(none on file)</span>"
+              (esc (:contact c)))
+            (yes-no (boolean (facts/client-verified? c))
+                    "ok" "critical" "verified" "NOT verified"))))
+
+(defn- equipment-row [snap equipment-id]
+  (let [e (store/equipment snap equipment-id)
+        etype (:equipment-type e)
+        required? (facts/safety-checklist-required? etype)
+        checklist (store/checklist-for-equipment snap equipment-id)]
+    (format "        <tr><td><code>%s</code></td><td>%s</td><td><code>%s</code></td><td>%s</td><td>%s</td></tr>"
+            (esc (:id e)) (esc (:model e)) (esc (kw etype))
+            (yes-no (boolean (facts/equipment-registered? e))
+                    "ok" "critical" "registered" "NOT registered")
+            (cond
+              (not required?) "<span class=\"muted\">not required</span>"
+              (facts/safety-checklist-complete? checklist)
+              "<span class=\"ok\">complete</span>"
+              :else "<span class=\"critical\">INCOMPLETE</span>"))))
+
+(defn- estimate-cell [snap intake-id]
+  (let [est (store/estimate-for-intake snap intake-id)]
+    (if-not est
+      "<span class=\"critical\">no estimate on file</span>"
+      (format "%s h &middot; parts <span class=\"amt\">%s</span> claimed / <span class=\"amt\">%s</span> recomputed &middot; %s"
+              (esc (:labor-hours est))
+              (esc (:total-parts-cost est))
+              (esc (registry/compute-total-parts-cost (:parts est)))
+              (yes-no (boolean (registry/parts-cost-matches-claim? est))
+                      "ok" "critical" "matches" "MISMATCH")))))
+
+(defn- intake-row [snap ledger intake-id]
+  (let [r (store/intake-record snap intake-id)]
+    (format (str "        <tr><td><code>%s</code></td><td><code>%s</code></td>"
+                 "<td><code>%s</code></td><td>%s</td><td>%s</td><td>%s</td></tr>")
+            (esc (get r "record_id"))
+            (esc (get r "client_id"))
+            (esc (get r "equipment_id"))
+            (estimate-cell snap intake-id)
+            (str/join " &middot; "
+                      [(yes-no (store/intake-already-dispatched? snap intake-id)
+                               "ok" "muted" "dispatched" "not dispatched")
+                       (yes-no (store/parts-already-ordered? snap intake-id)
+                               "ok" "muted" "parts ordered" "no parts order")
+                       (yes-no (store/repair-already-completed? snap intake-id)
+                               "ok" "muted" "repair complete" "open")])
+            (status-cell ledger intake-id))))
+
+(def ^:private ops
+  "The closed op vocabulary `electronicrepair.advisor/MockAdvisor`
+  dispatches on -- the same five ops `electronicrepair.governor/check`
+  validates."
+  [:intake-repair-order :schedule-technician-dispatch :order-parts
+   :complete-repair :flag-safety-concern])
+
+(defn- rules-observed
+  "Every HARD rule the governor actually emitted for `op` in this run.
+  Runtime evidence, not a hand-maintained list."
+  [ledger op]
+  (->> ledger
+       (filter #(and (= :governor-hold (:t %)) (= op (:op %))))
+       (mapcat :basis)
+       distinct
+       sort))
+
+(defn- gate-row [ledger op]
+  (let [min-phase (phase/phase-for-op op)
+        auto? (phase/phase-allows-commit? 3 op)
+        rules (rules-observed ledger op)]
+    (format "        <tr><td><code>%s</code></td><td>%s</td><td>%s</td><td>%s</td></tr>"
+            (esc (kw op))
+            (esc (kw min-phase))
+            (yes-no auto? "ok" "warn"
+                    "auto-commit when clean"
+                    "ALWAYS human approval")
+            (if (seq rules)
+              (str "<code>" (str/join "</code>, <code>" (map (comp esc kw) rules)) "</code>")
+              "<span class=\"muted\">none fired this run</span>"))))
+
+(defn- hold-rows [ledger]
+  (->> ledger
+       (filter #(= :governor-hold (:t %)))
+       (mapcat (fn [f]
+                 (map (fn [v]
+                        (format (str "        <tr><td><code>%s</code></td><td><code>%s</code></td>"
+                                     "<td><span class=\"critical\">%s</span></td><td>%s</td></tr>")
+                                (esc (kw (:op f)))
+                                (esc (:subject f))
+                                (esc (kw (:rule v)))
+                                (esc (:detail v))))
+                      (:violations f))))
+       (str/join "\n")))
+
+(defn- ledger-row [{:keys [t op subject disposition basis confidence]}]
+  (format (str "        <tr><td>%s</td><td><code>%s</code></td><td><code>%s</code></td>"
+               "<td>%s</td><td>%s</td><td class=\"num\">%s</td></tr>")
+          (esc (name t))
+          (esc (kw (or op :n-a)))
+          (esc subject)
+          (esc (some-> disposition name))
+          (if (seq basis)
+            (str "<code>" (str/join "</code>, <code>" (map (comp esc kw) basis)) "</code>")
+            "<span class=\"muted\">-</span>")
+          (if (some? confidence) (esc confidence) "<span class=\"muted\">-</span>")))
+
+(defn render
+  "Render the console from a store that has already been driven by
+  `run-demo!` (or any other real scenario)."
+  [s]
+  (let [snap (store/snapshot s)
+        ledger (vec (store/ledger s))
+        client-rows (str/join "\n" (map (partial client-row snap)
+                                        (sort (keys (:clients snap)))))
+        equipment-rows (str/join "\n" (map (partial equipment-row snap)
+                                           (sort (keys (:equipment snap)))))
+        intake-rows (str/join "\n" (map (partial intake-row snap ledger)
+                                        (sort (store/all-intakes snap))))
+        gate-rows (str/join "\n" (map (partial gate-row ledger) ops))
+        holds (hold-rows ledger)
+        ledger-rows (str/join "\n" (map ledger-row ledger))
+        n-holds (count (filter #(= :governor-hold (:t %)) ledger))
+        n-commits (count (filter #(= :committed (:t %)) ledger))
+        n-rejected (count (filter #(= :approval-rejected (:t %)) ledger))]
+    (str
+     "<!DOCTYPE html>\n"
+     "<html lang=\"en\"><head><meta charset=\"utf-8\">\n"
+     "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\">\n"
+     "<title>cloud-itonami-isic-3313 &middot; electronicrepair operator console</title>\n"
+     "<style>\n" (jp-go-dds.skin/dds+skin) "\n</style></head><body>\n"
+     "<header class=\"bar\">\n"
+     "  <h1>Electronic &amp; optical equipment repair (ISIC 3313) — Operator Console</h1>\n"
+     "</header>\n"
+     "<p class=\"subtitle\"><span class=\"badge\">read-only sample</span> "
+     "Generated at build time by <code>clojure -M:dev:render-html</code> "
+     "(<code>electronicrepair.render-html</code>), driving the real compiled "
+     "StateGraph in <code>electronicrepair.operation</code> through the "
+     "independent <code>electronicrepair.governor</code>. "
+     "This run produced <strong>" n-commits "</strong> commits, "
+     "<strong>" n-holds "</strong> HARD holds and "
+     "<strong>" n-rejected "</strong> approver rejection(s). "
+     "Repair work itself is never performed here — a technician's hands-on "
+     "repair and sign-off remain that technician's exclusive authority.</p>\n"
+     "<main>\n"
+
+     "  <section class=\"card\">\n"
+     "    <h2>Clients on file</h2>\n"
+     "    <p class=\"muted\">Verification is <code>electronicrepair.facts/client-verified?</code> "
+     "evaluated against the seeded record — id, name and contact must all be present.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Client</th><th>Name</th><th>Contact</th><th>Verification</th></tr></thead>\n"
+     "      <tbody>\n" client-rows "\n      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+
+     "  <section class=\"card\">\n"
+     "    <h2>Equipment on file</h2>\n"
+     "    <p class=\"muted\">A safety checklist is demanded for the hazardous types "
+     "<code>facts/safety-checklist-required?</code> names — high-voltage, radioactive, CRT, laser. "
+     "Completion is <code>facts/safety-checklist-complete?</code>, which requires the electrical "
+     "safety check, the hazmat assessment and the technician certification all to be signed.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Equipment</th><th>Model</th><th>Type</th><th>Registration</th>"
+     "<th>Safety checklist</th></tr></thead>\n"
+     "      <tbody>\n" equipment-rows "\n      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+
+     "  <section class=\"card\">\n"
+     "    <h2>Repair intakes</h2>\n"
+     "    <p class=\"muted\">Intake numbers are minted by "
+     "<code>electronicrepair.registry/register-intake</code>. The parts total is recomputed "
+     "independently by <code>registry/compute-total-parts-cost</code> from the estimate's own "
+     "parts list — the claimed total is never trusted.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Intake</th><th>Client</th><th>Equipment</th><th>Estimate</th>"
+     "<th>Progress</th><th>Last ledger fact</th></tr></thead>\n"
+     "      <tbody>\n" intake-rows "\n      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+
+     "  <section class=\"card\">\n"
+     "    <h2>Action gate</h2>\n"
+     "    <p class=\"muted\">Minimum phase and auto-commit eligibility are computed by calling "
+     "<code>electronicrepair.phase/phase-for-op</code> and <code>phase/phase-allows-commit?</code> "
+     "at phase 3 — the highest phase this actor defines. The confidence floor is "
+     "<code>governor/confidence-floor</code> = <span class=\"num\">" governor/confidence-floor
+     "</span>; the stakes that escalate even when governor-clean are "
+     "<code>governor/high-stakes</code> = "
+     (str/join ", " (map #(str "<code>" (esc (kw %)) "</code>")
+                         (sort-by str governor/high-stakes)))
+     ". HARD violations cannot be overridden by an approver.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Op</th><th>Min phase</th><th>Gate at phase 3</th>"
+     "<th>HARD rules that fired this run</th></tr></thead>\n"
+     "      <tbody>\n" gate-rows "\n      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+
+     "  <section class=\"card\">\n"
+     "    <h2>HARD holds this run</h2>\n"
+     "    <p class=\"muted\">Each row is one violation map the governor itself returned "
+     "(<code>:rule</code> and <code>:detail</code> verbatim). A HARD hold never reaches a human "
+     "approver — the graph routes straight from <code>:decide</code> to <code>:hold</code>.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Op</th><th>Subject</th><th>Rule</th><th>Governor detail</th></tr></thead>\n"
+     "      <tbody>\n" holds "\n      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+
+     "  <section class=\"card\">\n"
+     "    <h2>Audit ledger</h2>\n"
+     "    <p class=\"muted\">The append-only log from "
+     "<code>electronicrepair.store/append-ledger!</code>, in append order. Only "
+     "<code>:committed</code>, <code>:governor-hold</code> and <code>:approval-rejected</code> "
+     "facts are ever appended; proposal traces and approval grants stay on the graph's in-memory "
+     "<code>:audit</code> channel and are deliberately not shown as ledger rows.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Fact</th><th>Op</th><th>Subject</th><th>Disposition</th><th>Basis</th>"
+     "<th>Confidence</th></tr></thead>\n"
+     "      <tbody>\n" ledger-rows "\n      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+     "</main>\n"
+     "<footer><p>cloud-itonami-isic-3313 — Community electronic and optical equipment repair "
+     "operations. Sample data; no real client, equipment or repair record is represented.</p></footer>\n"
+     "</body></html>\n")))
+
+(defn -main [& args]
+  (let [out (or (first args) "docs/samples/operator-console.html")
+        s (run-demo!)
+        html (render s)
+        f (java.io.File. ^String out)]
+    (some-> (.getParentFile f) (.mkdirs))
+    (spit f html)
+    (println "wrote" out
+             "(" (count (store/ledger s)) "ledger facts,"
+             (count (filter #(= :governor-hold (:t %)) (store/ledger s))) "HARD holds )")))
