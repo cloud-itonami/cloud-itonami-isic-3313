@@ -19,11 +19,17 @@
 
 (def shop-dispatcher {:actor-id "shop-dispatcher-01" :role :shop-coordinator})
 
-(def ^:private seed
+(def seed
   "Reference repair-shop data: one verified client, one office-equipment
   record (no safety checklist required), one hazardous CRT record (with
   a completed safety checklist), and one pre-existing intake with a
-  documented, cost-matching estimate ready for dispatch/parts proposals."
+  documented, cost-matching estimate ready for dispatch/parts proposals.
+
+  PUBLIC on purpose: `electronicrepair.render-html` seeds its build-time
+  operator console from THIS var, so the rendered page and this demo
+  driver exercise the same reference shop and cannot drift apart. This
+  repo keeps its seed here rather than in `electronicrepair.store` --
+  `store/mem-store` takes an `:initial` plain map, it does not ship one."
   {:clients {"C001" {:id "C001" :name "ABC Electronics" :contact "contact@abc-electronics.example"}}
    :equipment {"E001" {:id "E001" :model "HP-LaserJet-4050" :equipment-type :office-equipment}
                "E002" {:id "E002" :model "Philips-CRT-Monitor" :equipment-type :crt}}
