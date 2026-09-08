@@ -1,6 +1,6 @@
 (ns electronicrepair.registry-test
   (:require [clojure.test :refer :all]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [electronicrepair.registry :as registry]))
 
 (deftest test-compute-total-parts-cost
