@@ -22,7 +22,7 @@
   call to any real repair-shop system. It builds the RECORD a shop
   operator would keep, not the act of repairing itself (that is
   `electronicrepair.operation`'s hand-on work — always technician-gated)."
-  (:require [clojure.string :as str]))
+  (:require [kotoba.lang.text :as str]))
 
 (defn- unsigned-certificate
   "Every certificate this actor produces is UNSIGNED — signature is
@@ -94,7 +94,7 @@
     (throw (ex-info "intake: shop_code required" {})))
   (when (< sequence 0)
     (throw (ex-info "intake: sequence must be >= 0" {})))
-  (let [intake-number (str (str/upper-case shop-code) "-INT-" (zero-pad sequence 6))
+  (let [intake-number (str (str/upper shop-code) "-INT-" (zero-pad sequence 6))
         record {"record_id" intake-number
                 "kind" "repair-intake-draft"
                 "client_id" client-id
@@ -117,7 +117,7 @@
     (throw (ex-info "dispatch: shop_code required" {})))
   (when (< sequence 0)
     (throw (ex-info "dispatch: sequence must be >= 0" {})))
-  (let [dispatch-number (str (str/upper-case shop-code) "-DSP-" (zero-pad sequence 6))
+  (let [dispatch-number (str (str/upper shop-code) "-DSP-" (zero-pad sequence 6))
         record {"record_id" dispatch-number
                 "kind" "technician-dispatch-draft"
                 "intake_id" intake-id
@@ -138,7 +138,7 @@
     (throw (ex-info "parts-order: shop_code required" {})))
   (when (< sequence 0)
     (throw (ex-info "parts-order: sequence must be >= 0" {})))
-  (let [order-number (str (str/upper-case shop-code) "-PRT-" (zero-pad sequence 6))
+  (let [order-number (str (str/upper shop-code) "-PRT-" (zero-pad sequence 6))
         record {"record_id" order-number
                 "kind" "parts-order-draft"
                 "intake_id" intake-id

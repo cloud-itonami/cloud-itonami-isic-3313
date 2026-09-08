@@ -9,7 +9,7 @@
   2. Equipment record exists with repair history
   3. Safety checklist completed for hazardous equipment types
   4. Estimate provided and agreed"
-  (:require [clojure.string :as str]))
+  (:require [kotoba.lang.text :as str]))
 
 (defn client-verified?
   "Has the client record been verified in the shop system?
