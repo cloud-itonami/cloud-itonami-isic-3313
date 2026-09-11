@@ -49,7 +49,7 @@
  `:flag-safety-concern` (safety escalation) ALWAYS escalate to a human
  shop dispatcher via the compiled graph's `:request-approval` node
  (checkpoint-based resume), matching governor's own `high-stakes` set.
- Proven end-to-end by `test/electronicrepair/operation_graph_test.clj`
+ Proven end-to-end by `test/electronicrepair/operation_graph_test.cljk`
  exercising commit / hard-hold (unverified client) / escalate-approve /
  escalate-reject / duplicate-dispatch hard-hold (after a genuine prior
  commit) through the REAL compiled graph, including a falsifiable proof
