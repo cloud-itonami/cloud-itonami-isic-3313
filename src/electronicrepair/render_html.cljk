@@ -38,7 +38,7 @@
   iterated in sorted-key order, so two consecutive runs against the
   same seed are byte-identical.
 
-  Usage: `clojure -M:dev:render-html [out-file]`
+  Usage: `kbb -M:dev:render-html [out-file]`
   (default `docs/samples/operator-console.html`)."
   (:require [jp-go-dds.skin]
             [kotoba.lang.text :as str]
@@ -426,7 +426,7 @@
      "  <h1>Electronic &amp; optical equipment repair (ISIC 3313) — Operator Console</h1>\n"
      "</header>\n"
      "<p class=\"subtitle\"><span class=\"badge\">read-only sample</span> "
-     "Generated at build time by <code>clojure -M:dev:render-html</code> "
+     "Generated at build time by <code>kbb -M:dev:render-html</code> "
      "(<code>electronicrepair.render-html</code>), driving the real compiled "
      "StateGraph in <code>electronicrepair.operation</code> through the "
      "independent <code>electronicrepair.governor</code>. "
