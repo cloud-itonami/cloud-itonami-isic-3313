@@ -1,10 +1,10 @@
 (ns electronicrepair.sim
   "Simulation harness for the Community Electronic and Optical Equipment
-  Repair Operations coordinator actor. Run with: clojure -M:dev:run
+  Repair Operations coordinator actor. Run with: kbb -M:dev:run
 
   PRIOR GAP (fixed here): `deps.edn`'s `:run` alias already pointed at
   `-m electronicrepair.sim`, but this namespace did not exist anywhere
-  in the repo -- `clojure -M:dev:run` would have failed outright. This
+  in the repo -- `kbb -M:dev:run` would have failed outright. This
   drives the real compiled graph (`operation/build`) through a clean
   low-stakes commit (`:intake-repair-order`), a clean dispatch/parts
   commit, two always-escalate high-stakes paths
@@ -110,7 +110,7 @@
     {:ledger (store/ledger s)}))
 
 (defn -main
-  "clojure -M:run entrypoint."
+  "kbb -M:run entrypoint."
   [& _args]
   (demo))
 
