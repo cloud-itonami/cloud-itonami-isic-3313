@@ -1,0 +1,46 @@
+;; What this vertical's robot physically does, declared for
+;; kotoba.robotics.process (kotoba-lang/robotics). `kbb -M:dev:physics` runs it.
+;;
+;; README "Robotics premise": diagnostic test-rig operation, component-level
+;; rework assist and post-repair calibration-verification robots repair
+;; electronic and optical equipment under an actor that proposes and an
+;; independent Electronic Repair Governor that gates (no return to service
+;; without verification). The physical work: bottom-side preheating of a
+;; circuit board before a BGA rework, the heat a potted power module builds
+;; up on post-repair burn-in, and an arm placing an instrument on the
+;; verification rig.
+;;
+;; Every number without a cited source is marked `estimate` in its :basis.
+;; Replacing an estimate with a sourced value is this bot's growth work.
+{:physics/schema "itonami.physical-ai.spec.v1"
+ :repo "cloud-itonami/cloud-itonami-isic-3313"
+ :cases
+ [{:id :bga-rework-board-preheat
+   :kind :thermal
+   :procedure "rework station's bottom heater blows 200 C air under a circuit board; the top side must reach the 150 C preheat before the BGA nozzle starts"
+   :params {:conductivity-w-mk 0.35 :density-kg-m3 1850.0 :specific-heat-j-kgk 1100.0
+            :t0-c 25.0 :t-hot-c 200.0 :h-front-w-m2k 60.0 :t-back-ambient-c 25.0 :h-back-w-m2k 10.0
+            :threshold-c 150.0 :duration-s 1200.0 :nodes 9}
+   :sweep {:param :thickness-m :values [0.0008 0.0016 0.0024 0.0032 0.0048]}
+   :quantity :time-to-threshold-s
+   :limit {:max 180.0 :basis "estimate: a 3-minute preheat stage of the rework profile; board through-thickness conductivity and heater h = 60 W/m2K are estimates"}
+   :boundary {:lo 0.0004 :hi 0.008}}
+  {:id :potted-module-burn-in
+   :kind :thermal
+   :procedure "repaired potted power module runs its burn-in in a 40 C chamber; internal losses heat the potting from inside. Half the module is modelled with an adiabatic (symmetry) back face, so the back face is the module core"
+   :params {:thickness-m 0.010 :conductivity-w-mk 0.50 :density-kg-m3 1500.0 :specific-heat-j-kgk 1000.0
+            :t0-c 40.0 :t-hot-c 40.0 :h-front-w-m2k 10.0 :h-back-w-m2k 0.0
+            :threshold-c 105.0 :duration-s 14400.0 :nodes 11}
+   :sweep {:param :q-gen-w-m3 :values [10000.0 20000.0 40000.0 60000.0 80000.0]}
+   :quantity :final-back-c
+   :limit {:max 105.0 :basis "estimate: the 105 C rating typical of the electrolytic capacitors inside such a module"}
+   :boundary {:lo 5000.0 :hi 150000.0}}
+  {:id :instrument-onto-verification-rig
+   :kind :manipulator
+   :procedure "rig arm lifts a repaired bench instrument (oscilloscope / analyser) from the rework cart onto the calibration-verification rig shelf"
+   :params {:l1-m 0.55 :l2-m 0.50 :m1-kg 7.0 :m2-kg 5.0
+            :from [0.60 -0.05] :to [0.35 0.50] :duration-s 2.5 :steps 400}
+   :sweep {:param :payload-kg :values [3.0 6.0 9.0 12.0 16.0]}
+   :quantity :peak-tau1-nm
+   :limit {:max 120.0 :basis "estimate: continuous shoulder torque of a ~12 kg-payload collaborative arm class"}
+   :boundary {:lo 0.5 :hi 50.0}}]}

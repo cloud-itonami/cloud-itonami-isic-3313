@@ -1,5 +1,5 @@
 (ns electronicrepair.phase-test
-  (:require [clojure.test :refer :all]
+  (:require [clojure.test :refer [deftest is testing]]
             [electronicrepair.phase :as phase]))
 
 (deftest test-phase-allows-commit?
