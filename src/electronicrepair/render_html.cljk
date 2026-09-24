@@ -40,7 +40,7 @@
 
   Usage: `kbb -M:dev:render-html [out-file]`
   (default `docs/samples/operator-console.html`)."
-  (:require [jp-go-dds.skin]
+  (:require [kotoba.io :as kio] [jp-go-dds.skin]
             [kotoba.lang.text :as str]
             [langgraph.graph :as g]
             [electronicrepair.facts :as facts]
@@ -524,8 +524,8 @@
   (let [out (or (first args) "docs/samples/operator-console.html")
         s (run-demo!)
         html (render s)
-        f (java.io.File. ^String out)]
-    (some-> (.getParentFile f) (.mkdirs))
+        f (kio/file ^String out)]
+    (some-> (kio/parent-file f) (kio/mkdirs))
     (spit f html)
     (println "wrote" out
              "(" (count (store/ledger s)) "ledger facts,"
