@@ -32,7 +32,7 @@
     5. `store/mark-dispatched!` / `store/mark-completed!` only fire as a
        genuine effect of a real `:commit` -- never on hold or on the
        interrupted (not-yet-approved) escalate path."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [langgraph.graph :as g]
             [electronicrepair.advisor :as advisor]
             [electronicrepair.operation :as operation]
