@@ -1,5 +1,5 @@
 (ns electronicrepair.store-contract-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [electronicrepair.store :as store]))
 
 (def sample-store
